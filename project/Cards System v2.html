@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Wasilha · Connected Pair Cards / بطاقات متصلة</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Amiri:wght@400;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    .ws-sheet {
+      transition: transform 520ms cubic-bezier(0.2, 0.85, 0.2, 1);
+      will-change: transform;
+      touch-action: none;
+    }
+    .ws-sheet.dragging { transition: none; }
+
+    @keyframes ws-puzzle-in {
+      from { transform: translateY(16px) scale(0.985); }
+      to   { transform: translateY(0)    scale(1); }
+    }
+    .ws-puzzle > * {
+      opacity: 1;
+      animation: ws-puzzle-in 0.45s cubic-bezier(0.2,0.85,0.2,1) both;
+    }
+    .ws-puzzle > *:nth-child(1) { animation-delay: 0.04s; }
+    .ws-puzzle > *:nth-child(2) { animation-delay: 0.10s; }
+    .ws-puzzle > *:nth-child(3) { animation-delay: 0.16s; }
+    .ws-puzzle > *:nth-child(4) { animation-delay: 0.22s; }
+    @media (prefers-reduced-motion: reduce) {
+      .ws-puzzle > * { animation: none; }
+    }
+
+    .ws-bg-blob {
+      position: absolute; border-radius: 50%;
+      filter: blur(48px); opacity: 0.55;
+      pointer-events: none;
+    }
+
+    .pill-tab {
+      appearance: none; border: 0; cursor: pointer;
+      background: transparent; color: #6B6862;
+      font: 500 12px 'Geist', system-ui, sans-serif;
+      padding: 7px 14px; border-radius: 999px;
+      transition: all 180ms ease;
+      white-space: nowrap;
+    }
+    .pill-tab.active { background: #0A0908; color: #fff; }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="text/babel" src="ios-frame.jsx"></script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="components.jsx"></script>
+  <script type="text/babel" src="split-cards.jsx"></script>
+  <script type="text/babel" src="connected-pairs.jsx"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "lang": "en",
+      "sheetExpanded": true,
+      "puzzleOffset": 14
+    }/*EDITMODE-END*/;
+
+    // ─────────────────────────────────────────────────────────────
+    // Backdrop — soft white-to-lavender with a hint of street curve
+    // ─────────────────────────────────────────────────────────────
+    function Backdrop({ lang }) {
+      return (
+        <div style={{
+          position: 'absolute', inset: 0, overflow: 'hidden',
+          background: 'linear-gradient(180deg, #FFFFFF 0%, #FBF8FF 60%, #F2EBFE 100%)',
+        }}>
+          <div className="ws-bg-blob" style={{ width: 260, height: 260, top: -60, left: -70, background: W.lavender }}/>
+          <div className="ws-bg-blob" style={{ width: 220, height: 220, top: 30, right: -60, background: '#F8E0FF', opacity: 0.7 }}/>
+          <div className="ws-bg-blob" style={{ width: 200, height: 200, top: 150, left: 60, background: W.ivory, opacity: 0.85 }}/>
+
+          {/* status row */}
+          <div style={{ position: 'absolute', top: 60, left: 16, right: 16, display: 'flex', gap: 10, zIndex: 10 }}>
+            <div style={{
+              flex: 1, padding: '10px 14px', borderRadius: 999,
+              background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(20px)',
+              border: '0.5px solid rgba(255,255,255,0.9)',
+              boxShadow: '0 6px 18px rgba(114,52,128,0.08)',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1F8A5B', boxShadow: '0 0 0 4px rgba(31,138,91,0.18)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="mono" style={{ fontSize: 8.5, color: '#A6A29A', letterSpacing: '0.22em' }}>
+                  {lang === 'ar' ? 'الموقع' : 'CURRENT LOCATION'}
+                </div>
+                <div style={{ fontSize: 13.5, fontWeight: 500, marginTop: 1, color: '#0A0908' }}>
+                  {lang === 'ar' ? 'الرياض، الخرطوم' : 'Riyadh District, Khartoum'}
+                </div>
+              </div>
+            </div>
+            <div style={{
+              width: 44, height: 44, borderRadius: 14,
+              background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(20px)',
+              border: '0.5px solid rgba(255,255,255,0.9)',
+              boxShadow: '0 6px 18px rgba(114,52,128,0.08)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+            }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0A0908" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3.5"/>
+                <path d="M12 3 V5 M12 19 V21 M3 12 H5 M19 12 H21 M5.5 5.5 L7 7 M17 17 L18.5 18.5 M5.5 18.5 L7 17 M17 7 L18.5 5.5"/>
+              </svg>
+            </div>
+          </div>
+
+          {/* schematic road */}
+          <svg width="100%" height="100%" viewBox="0 0 402 600" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, opacity: 0.42 }}>
+            <path d="M -20 200 Q 100 160 200 200 T 420 180" stroke="#D6CDE8" strokeWidth="14" fill="none" strokeLinecap="round"/>
+            <path d="M -20 200 Q 100 160 200 200 T 420 180" stroke="#FBF8FF" strokeWidth="1.5" strokeDasharray="4 6" fill="none"/>
+            <path d="M 70 -20 Q 80 100 200 220 T 220 600" stroke="#E4DAF5" strokeWidth="10" fill="none" strokeLinecap="round"/>
+          </svg>
+
+          {/* origin pin */}
+          <div style={{ position: 'absolute', top: 190, left: '50%', transform: 'translateX(-50%)', zIndex: 5 }}>
+            <div style={{
+              width: 18, height: 18, borderRadius: '50%',
+              background: W.purple, border: '3px solid #fff',
+              boxShadow: `0 0 0 4px ${W.purple}22, 0 8px 18px ${W.purple}50`,
+              position: 'relative',
+            }}>
+              <div style={{
+                position: 'absolute', inset: -10, borderRadius: '50%',
+                background: W.purple, opacity: 0.18,
+                animation: 'pulse-ring 2.4s ease-out infinite',
+              }} />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function StageMeta() {
+      return (
+        <>
+          <div className="stage-rail">
+            <div className="num">CARD SYSTEM v2 / 2026</div>
+            <div className="ar-label">بطاقات متّصلة</div>
+            <div className="en-label">Connected Pairs.</div>
+            <div className="num" style={{ marginTop: 4 }}>SHARED-EDGE · MORPHING CUT</div>
+          </div>
+          <div className="stage-meta">
+            <div>© 2026 WASILHA INDUSTRIES · KRT</div>
+            <div style={{ display: 'flex', gap: 14 }}>
+              <span>FOUR PAIRS · ONE ECOSYSTEM</span>
+              <span style={{ color: W.purple }}>● PROTOTYPE LIVE</span>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Bottom sheet (drag handle)
+    // ─────────────────────────────────────────────────────────────
+    function BottomSheet({ children, header, expanded, onToggleExpanded }) {
+      const SHEET_HEIGHT = 720;
+      const PEEK = 290;
+      const peekY = SHEET_HEIGHT - PEEK;
+
+      const [drag, setDrag] = useState(null);
+      const [offset, setOffset] = useState(expanded ? 0 : peekY);
+
+      useEffect(() => {
+        if (!drag) setOffset(expanded ? 0 : peekY);
+      }, [expanded]);
+
+      const onPointerDown = (e) => {
+        const baseY = expanded ? 0 : peekY;
+        setDrag({ startY: e.clientY, baseY });
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      };
+      const onPointerMove = (e) => {
+        if (!drag) return;
+        const dy = e.clientY - drag.startY;
+        let next = drag.baseY + dy;
+        next = Math.max(0, Math.min(peekY, next));
+        setOffset(next);
+      };
+      const onPointerUp = () => {
+        if (!drag) return;
+        const snapExpanded = offset < peekY / 2;
+        setDrag(null);
+        setOffset(snapExpanded ? 0 : peekY);
+        onToggleExpanded(snapExpanded);
+      };
+
+      return (
+        <div
+          className={'ws-sheet' + (drag ? ' dragging' : '')}
+          style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0,
+            height: SHEET_HEIGHT,
+            transform: `translateY(${offset}px)`,
+            background: '#FFFFFF',
+            borderTopLeftRadius: 32, borderTopRightRadius: 32,
+            boxShadow: '0 -14px 38px rgba(20,15,30,0.12), 0 -1px 0 rgba(255,255,255,0.7) inset',
+            display: 'flex', flexDirection: 'column',
+            zIndex: 20,
+          }}
+        >
+          <div
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            style={{ padding: '14px 0 6px', display: 'flex', justifyContent: 'center', cursor: 'grab', touchAction: 'none' }}
+          >
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: '#E2DDD0' }}/>
+          </div>
+
+          <div style={{ padding: '6px 22px 14px' }}>
+            {header}
+          </div>
+
+          <div className="no-scroll" style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 36px' }}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Pair definitions — each is one ConnectedPair built from
+    // the geometries declared in connected-pairs.jsx
+    // ─────────────────────────────────────────────────────────────
+    function PairBlock({ children, offset = 0, indent = 0, overlap = 0 }) {
+      // Slight stagger so pairs read as a connected puzzle ecosystem
+      return (
+        <div style={{
+          marginTop: overlap ? -overlap : 0,
+          marginLeft: offset > 0 ? offset : 0,
+          marginRight: offset < 0 ? -offset : 0,
+          paddingLeft: indent,
+          paddingRight: -indent < 0 ? -indent : 0,
+        }}>
+          {children}
+        </div>
+      );
+    }
+
+    function RakshaMotorPair({ lang }) {
+      const a = {
+        bg: `linear-gradient(150deg, ${W.deepPurple} 0%, #4F1F5C 100%)`,
+        ink: '#FFFFE3',
+        glow: W.purple,
+        label: 'Raksha',
+        content: <SideLeft
+          label={lang === 'ar' ? 'ركشة · الأسرع' : 'S-01 · RAKSHA'}
+          name="Raksha" ar={lang === 'ar' ? 'راكشة' : null}
+          sub={lang === 'ar' ? 'الأرخص · الأسرع في الزحمة' : 'Cheapest · cuts traffic'}
+          price="1,850" eta={lang === 'ar' ? '٢ دقيقة' : '2 MIN'}
+          icon="raksha"
+        />,
+      };
+      const b = {
+        bg: W.ivory,
+        ink: W.deepPurple,
+        glow: W.purple,
+        label: 'Motorcycle',
+        content: <SideRight
+          label={lang === 'ar' ? 'موتر · راكب واحد' : 'S-02 · MOTOR'}
+          name="Motor" ar={lang === 'ar' ? 'موتر' : null}
+          sub={lang === 'ar' ? 'يتسلل من الزحام' : 'Beats every queue'}
+          price="2,400" eta={lang === 'ar' ? '١ دقيقة' : '1 MIN'}
+          icon="bike"
+        />,
+      };
+      return <ConnectedPair geom="diagonal" height={184} a={a} b={b}/>;
+    }
+
+    function DeliveryRidesPair({ lang }) {
+      const a = {
+        bg: W.lavender,
+        ink: W.deepPurple,
+        glassy: true,
+        glow: W.purple,
+        label: 'Delivery',
+        content: <SideTop
+          label={lang === 'ar' ? 'توصيل طلبات' : 'S-03 · COURIER'}
+          name="Delivery" ar={lang === 'ar' ? 'توصيل' : null}
+          sub={lang === 'ar' ? 'حتى ٥ كجم · أي مكان' : 'Up to 5 kg · anywhere'}
+          icon="bag"
+        />,
+      };
+      const b = {
+        bg: `linear-gradient(160deg, ${W.purple} 0%, ${W.deepPurple} 100%)`,
+        ink: '#FFFFE3',
+        glow: W.purple,
+        label: 'Rides',
+        content: <SideBottom
+          label={lang === 'ar' ? 'مشاوير · سيارة' : 'S-04 · RIDES'}
+          name="Ride" ar={lang === 'ar' ? 'مشوار' : null}
+          eta={lang === 'ar' ? 'الآن · ٣ دقيقة' : 'NOW · 3 MIN'} price="4,200"
+          icon="car"
+        />,
+      };
+      return <ConnectedPair geom="trapezoid" height={170} a={a} b={b}/>;
+    }
+
+    function CarShippingPair({ lang }) {
+      const a = {
+        bg: W.ivory,
+        ink: W.deepPurple,
+        glow: W.purple,
+        label: 'Car',
+        content: <SideTop
+          label={lang === 'ar' ? 'سيارة · ٤ ركاب' : 'S-05 · CAR'}
+          name="Car" ar={lang === 'ar' ? 'سيارة' : null}
+          sub={lang === 'ar' ? 'مكيّفة · فسيحة' : 'A/C · spacious'}
+          price="4,200" icon="car"
+        />,
+      };
+      const b = {
+        bg: `linear-gradient(140deg, ${W.deepPurple} 0%, ${W.purple} 100%)`,
+        ink: '#FFFFE3',
+        glow: W.purple,
+        label: 'Shipping',
+        content: <SideBottom
+          label={lang === 'ar' ? 'شحن طرود كبيرة' : 'S-06 · CARGO'}
+          name="Shipping" ar={lang === 'ar' ? 'شحن' : null}
+          eta={lang === 'ar' ? 'مجدول · غدا' : 'SCHEDULED'} price="9,800"
+          icon="bag"
+        />,
+      };
+      return <ConnectedPair geom="chevron" height={186} a={a} b={b}/>;
+    }
+
+    function StoreTrackingPair({ lang }) {
+      const a = {
+        bg: `linear-gradient(135deg, ${W.lavender} 0%, #BFB1F0 100%)`,
+        ink: W.deepPurple,
+        glassy: true,
+        glow: W.purple,
+        label: 'Store',
+        content: <SideLeft
+          label={lang === 'ar' ? 'متجر وصلها' : 'S-07 · STORE'}
+          name="Store" ar={lang === 'ar' ? 'متجر' : null}
+          sub={lang === 'ar' ? 'بقالة · أدوية · فطور' : 'Groceries · pharmacy'}
+          icon="bowl"
+        />,
+      };
+      const b = {
+        bg: `linear-gradient(160deg, ${W.deepPurple} 0%, #3A1A45 100%)`,
+        ink: '#FFFFE3',
+        glow: W.purple,
+        label: 'Tracking',
+        content: <SideRight
+          label={lang === 'ar' ? 'تتبع طلبك' : 'S-08 · TRACK'}
+          name="Track" ar={lang === 'ar' ? 'تتبع' : null}
+          sub={lang === 'ar' ? '٢ طلبات نشطة' : '2 active orders'}
+          eta={lang === 'ar' ? '٨ دقيقة' : '8 MIN'} icon="pin"
+        />,
+      };
+      return <ConnectedPair geom="hexZig" height={164} a={a} b={b}/>;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // App
+    // ─────────────────────────────────────────────────────────────
+    function App() {
+      const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+      const [tweaksOpen, setTweaksOpen] = useState(false);
+      const [expanded, setExpanded] = useState(tweaks.sheetExpanded !== false);
+
+      useEffect(() => {
+        const handler = (e) => {
+          if (!e.data) return;
+          if (e.data.type === '__activate_edit_mode') setTweaksOpen(true);
+          if (e.data.type === '__deactivate_edit_mode') setTweaksOpen(false);
+        };
+        window.addEventListener('message', handler);
+        window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+        return () => window.removeEventListener('message', handler);
+      }, []);
+
+      const closeTweaks = () => {
+        setTweaksOpen(false);
+        window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
+      };
+
+      const lang = tweaks.lang;
+      const dir  = lang === 'ar' ? 'rtl' : 'ltr';
+      const off  = tweaks.puzzleOffset;
+
+      const header = (
+        <div>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 14, padding: 4, background: '#F4F0EA', borderRadius: 999, alignSelf: 'flex-start', width: 'fit-content' }}>
+            <button className="pill-tab active">{lang === 'ar' ? 'الخدمات' : 'Services'}</button>
+            <button className="pill-tab">{lang === 'ar' ? 'مفضلتك' : 'Saved'}</button>
+            <button className="pill-tab">{lang === 'ar' ? 'النشط' : 'Active'}</button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
+            <div>
+              <div className="mono" style={{ fontSize: 9.5, color: '#A6A29A', letterSpacing: '0.32em' }}>
+                {lang === 'ar' ? 'منظومة متّصلة · ٨ خدمات' : 'CONNECTED · 8 SERVICES'}
+              </div>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1, letterSpacing: '-0.025em', marginTop: 4 }}>
+                {lang === 'ar'
+                  ? <>كل شيء <span style={{ color: W.purple, fontStyle: 'italic' }}>متّصل</span>.</>
+                  : <>One <span style={{ color: W.purple, fontStyle: 'italic' }}>ecosystem.</span></>}
+              </div>
+              {lang === 'ar'
+                ? <div style={{ fontSize: 12, color: '#6B6862', marginTop: 4, maxWidth: 240 }}>اضغط أي نصف من البطاقة. الجزء الآخر ينحني ليفسح المجال.</div>
+                : <div style={{ fontSize: 12, color: '#6B6862', marginTop: 4, maxWidth: 240 }}>Tap either side of a pair. The other half folds back.</div>}
+            </div>
+            <button style={{
+              padding: '7px 12px', borderRadius: 999, border: '0.5px solid rgba(114,52,128,0.18)',
+              background: 'rgba(157,0,255,0.06)', color: W.deepPurple,
+              fontFamily: 'Geist Mono, monospace', fontSize: 9.5, letterSpacing: '0.22em',
+              cursor: 'pointer', flexShrink: 0,
+            }}>
+              {lang === 'ar' ? 'الكل' : 'ALL'}
+            </button>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="stage">
+          <StageMeta/>
+          <div className="device-stage">
+            <div className="device-caption">
+              <span className="dot"/>
+              <span>CONNECTED PAIRS</span>
+              <span style={{ opacity: 0.5 }}>·</span>
+              <span style={{ color: '#0A0908' }}>Press a side — shared edge morphs</span>
+            </div>
+
+            <IOSDevice width={402} height={874} dark={false}>
+              <div dir={dir} style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#FFFFFF' }}>
+                <Backdrop lang={lang}/>
+
+                <BottomSheet
+                  expanded={expanded}
+                  onToggleExpanded={(v) => { setExpanded(v); setTweak('sheetExpanded', v); }}
+                  header={header}
+                >
+                  {/* Puzzle of pairs — varied widths, staggered indent so they
+                      visually interlock without literal shared edges between pairs */}
+                  <div className="ws-puzzle">
+                    {/* HERO pair, full width */}
+                    <PairBlock>
+                      <RakshaMotorPair lang={lang}/>
+                    </PairBlock>
+
+                    {/* Pair 2 — slightly narrower, offset right, overlapping
+                        a bit with hero above */}
+                    <PairBlock offset={off} overlap={10}>
+                      <DeliveryRidesPair lang={lang}/>
+                    </PairBlock>
+
+                    {/* Pair 3 — narrower, offset opposite side */}
+                    <PairBlock offset={-off} overlap={10}>
+                      <CarShippingPair lang={lang}/>
+                    </PairBlock>
+
+                    {/* Pair 4 — full width, compact */}
+                    <PairBlock overlap={6}>
+                      <StoreTrackingPair lang={lang}/>
+                    </PairBlock>
+                  </div>
+
+                  {/* Footer chip — wallet glance */}
+                  <div style={{
+                    marginTop: 18, padding: 14, borderRadius: 18,
+                    background: 'linear-gradient(135deg, #FFFFE3 0%, #DBD4FF 100%)',
+                    border: '0.5px solid rgba(114,52,128,0.12)',
+                    display: 'flex', alignItems: 'center', gap: 14,
+                  }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 10px rgba(114,52,128,0.10)' }}>
+                      <MiniIcon name="clock" size={18} color={W.deepPurple} strokeWidth={1.6}/>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div className="mono" style={{ fontSize: 9, letterSpacing: '0.28em', color: W.deepPurple, opacity: 0.7 }}>
+                        {lang === 'ar' ? 'المحفظة · رصيدك' : 'WALLET · BALANCE'}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
+                        <span className="serif" style={{ fontSize: 22, color: W.deepPurple, letterSpacing: '-0.025em', lineHeight: 1 }}>42,180</span>
+                        <span className="mono" style={{ fontSize: 10, color: W.deepPurple, opacity: 0.7 }}>SDG</span>
+                      </div>
+                    </div>
+                    <button style={{
+                      padding: '8px 14px', borderRadius: 999, border: 0, cursor: 'pointer',
+                      background: W.deepPurple, color: '#FFFFE3',
+                      fontFamily: 'inherit', fontSize: 12, fontWeight: 500,
+                    }}>{lang === 'ar' ? 'أضف' : 'Top up'}</button>
+                  </div>
+                </BottomSheet>
+              </div>
+            </IOSDevice>
+          </div>
+
+          {tweaksOpen && (
+            <TweaksPanel title="Tweaks" onClose={closeTweaks}>
+              <TweakSection title="Sheet">
+                <TweakRadio
+                  label="State"
+                  value={expanded ? 'open' : 'peek'}
+                  onChange={(v) => { const open = v === 'open'; setExpanded(open); setTweak('sheetExpanded', open); }}
+                  options={[
+                    { label: 'Peek', value: 'peek' },
+                    { label: 'Open', value: 'open' },
+                  ]}
+                />
+              </TweakSection>
+
+              <TweakSection title="Puzzle">
+                <TweakSlider
+                  label="Stagger offset"
+                  min={0} max={28} step={2}
+                  value={tweaks.puzzleOffset}
+                  onChange={(v) => setTweak('puzzleOffset', v)}
+                />
+              </TweakSection>
+
+              <TweakSection title="Language">
+                <TweakRadio
+                  label="Direction"
+                  value={tweaks.lang}
+                  onChange={(v) => setTweak('lang', v)}
+                  options={[
+                    { label: 'EN', value: 'en' },
+                    { label: 'العربية', value: 'ar' },
+                  ]}
+                />
+              </TweakSection>
+
+              <TweakSection title="Hint">
+                <div style={{ fontSize: 11.5, color: '#6B6862', lineHeight: 1.5 }}>
+                  Hover or tap either half of a pair. The active side expands; the other shrinks; the shared edge morphs in 520 ms.
+                </div>
+              </TweakSection>
+            </TweaksPanel>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('app'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
