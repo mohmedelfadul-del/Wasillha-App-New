@@ -1,0 +1,4 @@
+#include "Generated.xcconfig"
+
+// Local secrets (MAPS_API_KEY=...). Not committed — see README.
+#include? "Secrets.xcconfig"

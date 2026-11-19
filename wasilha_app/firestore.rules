@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// Wasilha — Firestore security rules.
+// NOTE: wallet balance changes are made client-side for this MVP. Before
+// handling real money, move top-ups and charges to Cloud Functions and
+// make `balance` read-only for clients (see README → Production checklist).
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMe(uid) { return signedIn() && request.auth.uid == uid; }
+    function profile() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
+    function isDriver() { return signedIn() && profile().role == 'driver'; }
+
+    match /users/{uid} {
+      allow read: if signedIn();          // drivers/riders see each other's name & rating
+      allow create: if isMe(uid);
+      allow update: if isMe(uid);
+      allow delete: if false;
+
+      match /{sub=**} {
+        allow read, write: if isMe(uid);
+      }
+    }
+
+    match /trips/{tripId} {
+      allow create: if signedIn() && request.resource.data.riderId == request.auth.uid
+                    && request.resource.data.status == 'requested';
+      allow read: if signedIn() && (
+                    resource.data.riderId == request.auth.uid ||
+                    resource.data.driverId == request.auth.uid ||
+                    (resource.data.status == 'requested' && isDriver()));
+      // Rider manages their trip (accept bid, cancel, rate);
+      // assigned driver advances status / location.
+      allow update: if signedIn() && (
+                    resource.data.riderId == request.auth.uid ||
+                    resource.data.driverId == request.auth.uid);
+
+      match /bids/{driverId} {
+        allow read: if signedIn() && (
+                      get(/databases/$(db)/documents/trips/$(tripId)).data.riderId == request.auth.uid ||
+                      driverId == request.auth.uid);
+        allow write: if isMe(driverId) && isDriver();
+      }
+    }
+
+    match /orders/{orderId} {
+      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
+      allow read, update: if signedIn() && (
+                    resource.data.customerId == request.auth.uid ||
+                    (profile().role == 'store' && profile().storeName == resource.data.storeId));
+    }
+  }
+}
