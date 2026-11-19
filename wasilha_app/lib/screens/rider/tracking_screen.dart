@@ -235,7 +235,7 @@ class _TrackingScreenState extends State<TrackingScreen> with SingleTickerProvid
                 const SheetHandle(),
                 _DriverCard(trip: t),
                 const SizedBox(height: 16),
-                _actions(s),
+                _actions(s, t),
                 const SizedBox(height: 18),
                 _Timeline(trip: t, minutes: mins),
                 const SizedBox(height: 12),
@@ -257,7 +257,7 @@ class _TrackingScreenState extends State<TrackingScreen> with SingleTickerProvid
     );
   }
 
-  Widget _actions(AppState s) {
+  Widget _actions(AppState s, Trip trip) {
     Widget btn({required String icon, String? label, required bool dark, required VoidCallback onTap}) {
       final fg = dark ? Colors.white : W.text;
       final box = Container(
@@ -290,7 +290,7 @@ class _TrackingScreenState extends State<TrackingScreen> with SingleTickerProvid
           icon: 'chat',
           label: s.t('Message', 'رسالة'),
           dark: false,
-          onTap: () => comingSoon(context, s, s.t('In-app chat', 'المحادثة داخل التطبيق')),
+          onTap: () => context.go('chat', args: trip.id),
         ),
       ),
       const SizedBox(width: 8),

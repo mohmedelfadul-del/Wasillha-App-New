@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +7,7 @@ import '../../core/app_state.dart';
 import '../../core/nav.dart';
 import '../../data/backend.dart';
 import '../../data/catalog.dart';
+import '../../data/geo_api.dart';
 import '../../data/models.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
@@ -40,11 +43,33 @@ class _SearchScreenState extends State<SearchScreen> {
     final b = context.read<WasilhaBackend>();
     _saved = b.savedPlaces();
     _trips = b.myTrips();
-    _ctrl.addListener(() => setState(() {}));
+    _ctrl.addListener(_onQuery);
+  }
+
+  // Google Places results for the current query (empty without an API key).
+  List<Place> _remote = const [];
+  Timer? _debounce;
+  String _remoteFor = '';
+
+  void _onQuery() {
+    setState(() {});
+    if (!GeoApi.enabled) return;
+    _debounce?.cancel();
+    final q = _q.trim();
+    _debounce = Timer(const Duration(milliseconds: 350), () async {
+      final r = await GeoApi.searchPlaces(q, lang: context.read<AppState>().lang);
+      if (mounted && _q.trim() == q) {
+        setState(() {
+          _remote = r;
+          _remoteFor = q;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _ctrl.dispose();
     _focus.dispose();
     super.dispose();
@@ -399,9 +424,10 @@ class _SearchScreenState extends State<SearchScreen> {
     final q = _q.trim().toLowerCase();
     final savedHits = saved.where((p) =>
         p.name.toLowerCase().contains(q) || p.nameAr.contains(_q.trim()) || p.area.toLowerCase().contains(q));
-    final results = <Place>[...savedHits, ...Catalog.search(_q)];
+    final remote = _remoteFor == _q.trim() ? _remote : const <Place>[];
+    final results = <Place>[...savedHits, ...Catalog.search(_q), ...remote];
     final seen = <String>{};
-    final unique = results.where((p) => seen.add('${p.kind}:${p.id}')).take(8).toList();
+    final unique = results.where((p) => seen.add('${p.kind}:${p.id}')).take(12).toList();
     if (unique.isEmpty) {
       return Padding(
         padding: const EdgeInsets.only(top: 20),

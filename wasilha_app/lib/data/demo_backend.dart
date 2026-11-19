@@ -412,6 +412,50 @@ class DemoBackend implements WasilhaBackend {
         return l;
       });
 
+  @override
+  Future<void> updateDriverLocation(String tripId, double lat, double lng) async {
+    final t = _trips[tripId];
+    if (t == null) return;
+    _trips[tripId] = t.copyWith(driverLat: lat, driverLng: lng);
+    _emit();
+  }
+
+  // ── Chat ──────────────────────────────────────────────────
+  final Map<String, List<ChatMessage>> _chats = {};
+
+  static const _driverReplies = [
+    'On my way 👍',
+    'I\'m near the main gate.',
+    'Okay, see you in a few minutes.',
+    'تمام، أنا قريب.',
+  ];
+
+  @override
+  Stream<List<ChatMessage>> chat(String tripId) => _watch(() => List.unmodifiable(_chats[tripId] ?? const []));
+
+  @override
+  Future<void> sendMessage(String tripId, String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    final me = _uid ?? 'demo-user';
+    (_chats[tripId] ??= []).add(ChatMessage(id: _id(), senderId: me, text: t));
+    _emit();
+    // The simulated other party answers.
+    final trip = _trips[tripId];
+    if (trip == null) return;
+    final other = trip.riderId == me ? (trip.driverId ?? 'driver') : trip.riderId;
+    _later(Duration(milliseconds: 1500 + _rng.nextInt(1500)), () {
+      final reply = trip.riderId == me
+          ? _driverReplies[_rng.nextInt(_driverReplies.length)]
+          : 'Thanks! I\'m waiting outside.';
+      (_chats[tripId] ??= []).add(ChatMessage(id: _id(), senderId: other, text: reply));
+      _emit();
+    });
+  }
+
+  @override
+  Future<void> registerPushToken(String token) async {}
+
   // ── Wallet ────────────────────────────────────────────────
   @override
   Stream<List<WalletTxn>> transactions() => _watch(() {

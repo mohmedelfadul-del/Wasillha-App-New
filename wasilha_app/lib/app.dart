@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'core/app_state.dart';
+import 'core/push.dart';
 import 'theme/tokens.dart';
 
 // Onboarding & auth
@@ -20,6 +21,7 @@ import 'screens/rider/tracking_screen.dart';
 import 'screens/rider/complete_screen.dart';
 import 'screens/rider/food_screen.dart';
 import 'screens/rider/parcel_screen.dart';
+import 'screens/rider/chat_screen.dart';
 // Account
 import 'screens/account/wallet_screen.dart';
 import 'screens/account/topup_screen.dart';
@@ -49,6 +51,7 @@ final Map<String, WidgetBuilder> routes = {
   'food': (_) => const FoodScreen(),
   'parcel': (_) => const ParcelScreen(),
   'tracking': (_) => const TrackingScreen(),
+  'chat': (_) => const ChatScreen(),
   'complete': (_) => const CompleteScreen(),
   'wallet': (_) => const WalletScreen(),
   'topup': (_) => const TopupScreen(),
@@ -76,6 +79,8 @@ class WasilhaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Wasilha',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
+      scaffoldMessengerKey: messengerKey,
       theme: W.theme(s.accent, arabic: s.ar),
       locale: Locale(s.lang),
       supportedLocales: const [Locale('en'), Locale('ar')],

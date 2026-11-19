@@ -1,53 +1,95 @@
 rules_version = '2';
 
 // Wasilha — Firestore security rules.
-// NOTE: wallet balance changes are made client-side for this MVP. Before
-// handling real money, move top-ups and charges to Cloud Functions and
-// make `balance` read-only for clients (see README → Production checklist).
+// Money (balance, transactions, trip settlement, top-ups) is written only by
+// Cloud Functions (functions/src/index.ts). Clients write "intents".
 service cloud.firestore {
   match /databases/{db}/documents {
     function signedIn() { return request.auth != null; }
     function isMe(uid) { return signedIn() && request.auth.uid == uid; }
     function profile() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
     function isDriver() { return signedIn() && profile().role == 'driver'; }
+    function changes() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    // Fields only the server may change.
+    function serverOwnedUser() { return ['balance', 'rating', 'trips']; }
 
     match /users/{uid} {
-      allow read: if signedIn();          // drivers/riders see each other's name & rating
-      allow create: if isMe(uid);
-      allow update: if isMe(uid);
+      allow read: if signedIn();            // drivers/riders see each other's name & rating
+      allow create: if isMe(uid)
+                    && request.resource.data.get('balance', 0) == 0
+                    && request.resource.data.get('trips', 0) == 0;
+      allow update: if isMe(uid) && !changes().hasAny(serverOwnedUser());
       allow delete: if false;
 
-      match /{sub=**} {
+      match /transactions/{id} {
+        allow read: if isMe(uid);
+        allow write: if false;              // server only
+      }
+      match /notifications/{id} {
+        allow read, delete: if isMe(uid);
+        allow update: if isMe(uid) && changes().hasOnly(['read']);
+        allow create: if false;             // server only
+      }
+      match /places/{id} {
         allow read, write: if isMe(uid);
       }
     }
 
+    match /topups/{id} {
+      allow create: if signedIn()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.amount is int
+                    && request.resource.data.amount > 0;
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update, delete: if false;       // server only
+    }
+
     match /trips/{tripId} {
-      allow create: if signedIn() && request.resource.data.riderId == request.auth.uid
-                    && request.resource.data.status == 'requested';
+      function trip() { return get(/databases/$(db)/documents/trips/$(tripId)).data; }
+      function isParty() {
+        return signedIn() && (trip().riderId == request.auth.uid || trip().get('driverId', null) == request.auth.uid);
+      }
+
+      allow create: if signedIn()
+                    && request.resource.data.riderId == request.auth.uid
+                    && request.resource.data.status == 'requested'
+                    && !request.resource.data.keys().hasAny(['charged', 'tipCharged']);
       allow read: if signedIn() && (
                     resource.data.riderId == request.auth.uid ||
-                    resource.data.driverId == request.auth.uid ||
+                    resource.data.get('driverId', null) == request.auth.uid ||
                     (resource.data.status == 'requested' && isDriver()));
-      // Rider manages their trip (accept bid, cancel, rate);
-      // assigned driver advances status / location.
-      allow update: if signedIn() && (
-                    resource.data.riderId == request.auth.uid ||
-                    resource.data.driverId == request.auth.uid);
+      // Rider manages their trip (accept bid, cancel, rate, tip);
+      // assigned driver advances status / location. Settlement flags are server-only.
+      allow update: if signedIn()
+                    && !changes().hasAny(['charged', 'tipCharged', 'riderId'])
+                    && (resource.data.riderId == request.auth.uid ||
+                        resource.data.get('driverId', null) == request.auth.uid);
 
       match /bids/{driverId} {
-        allow read: if signedIn() && (
-                      get(/databases/$(db)/documents/trips/$(tripId)).data.riderId == request.auth.uid ||
-                      driverId == request.auth.uid);
-        allow write: if isMe(driverId) && isDriver();
+        allow read: if signedIn() && (trip().riderId == request.auth.uid || driverId == request.auth.uid);
+        allow write: if isMe(driverId) && isDriver() && trip().status == 'requested';
+      }
+
+      match /messages/{msgId} {
+        allow read: if isParty();
+        allow create: if isParty()
+                      && request.resource.data.senderId == request.auth.uid
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() <= 1000;
+        allow update, delete: if false;
       }
     }
 
     match /orders/{orderId} {
-      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
-      allow read, update: if signedIn() && (
-                    resource.data.customerId == request.auth.uid ||
-                    (profile().role == 'store' && profile().storeName == resource.data.storeId));
+      function isStaff() { return profile().role == 'store' && profile().storeName == resource.data.storeId; }
+      allow create: if signedIn()
+                    && request.resource.data.customerId == request.auth.uid
+                    && request.resource.data.status == 'placed'
+                    && !request.resource.data.keys().hasAny(['paid', 'refunded']);
+      allow read: if signedIn() && (resource.data.customerId == request.auth.uid || isStaff());
+      // Store staff move the order through its states; payment flags are server-only.
+      allow update: if signedIn() && isStaff() && changes().hasOnly(['status', 'courierName']);
     }
   }
 }

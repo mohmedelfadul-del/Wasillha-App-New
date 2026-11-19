@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/app_state.dart';
+import '../../core/location.dart';
 import '../../core/nav.dart';
 import '../../data/backend.dart';
 import '../../data/models.dart';
@@ -33,6 +34,8 @@ class _DriverDeliveryScreenState extends State<DriverDeliveryScreen> {
   TripStatus? _lastStatus;
   DateTime _phaseStart = DateTime.now();
   bool _busy = false;
+  StreamSubscription<dynamic>? _gps;
+  StreamSubscription<Trip?>? _tripSub;
 
   @override
   void initState() {
@@ -40,11 +43,32 @@ class _DriverDeliveryScreenState extends State<DriverDeliveryScreen> {
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
+    // Stream this phone's GPS to the active trip so the rider sees the car move.
+    // (Demo mode simulates movement itself.)
+    if (!_backend.isDemo) {
+      _tripSub = _backend.driverActiveTrip().listen((t) => _syncGps(t));
+    }
+  }
+
+  Future<void> _syncGps(Trip? t) async {
+    if (t == null || !t.isActive) {
+      await _gps?.cancel();
+      _gps = null;
+      return;
+    }
+    if (_gps != null || !await LocationService.ensurePermission()) return;
+    final id = t.id;
+    _gps = LocationService.track().listen(
+      (p) => _backend.updateDriverLocation(id, p.latitude, p.longitude),
+      onError: (_) {},
+    );
   }
 
   @override
   void dispose() {
     _clock?.cancel();
+    _gps?.cancel();
+    _tripSub?.cancel();
     super.dispose();
   }
 
@@ -270,7 +294,7 @@ class _DriverDeliveryScreenState extends State<DriverDeliveryScreen> {
                   size: 44,
                   shadow: false,
                   border: Border.all(color: W.border, width: 0.5),
-                  onTap: () => comingSoon(context, s.t('In-app chat is coming soon', 'المحادثة داخل التطبيق قريباً')),
+                  onTap: () => context.go('chat', args: t.id),
                   child: const WIcon('chat', size: 16, strokeWidth: 1.7),
                 ),
               ]),

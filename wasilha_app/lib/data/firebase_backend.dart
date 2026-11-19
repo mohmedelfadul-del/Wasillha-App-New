@@ -171,23 +171,9 @@ class FirebaseBackend implements WasilhaBackend {
   Future<void> cancelTrip(String tripId) => _trips.doc(tripId).update({'status': TripStatus.cancelled.name});
 
   @override
-  Future<void> completeAndRate(String tripId, {required int stars, int tip = 0}) => _db.runTransaction((tx) async {
-        final ref = _trips.doc(tripId);
-        final snap = await tx.get(ref);
-        final trip = Trip.fromMap(snap.id, snap.data()!);
-        final meRef = _me();
-        tx.update(ref, {'rating': stars, 'tip': tip, 'status': TripStatus.completed.name});
-        if (trip.rating == null && trip.payment == 'wallet') {
-          final total = trip.fare + tip;
-          tx.update(meRef, {'balance': FieldValue.increment(-total), 'trips': FieldValue.increment(1)});
-          tx.set(meRef.collection('transactions').doc(), WalletTxn(
-            id: '',
-            title: '${trip.service.label} · ${trip.dropoff.name}',
-            amount: -total,
-            kind: 'ride',
-          ).toMap());
-        }
-      });
+  Future<void> completeAndRate(String tripId, {required int stars, int tip = 0}) =>
+      // Money moves server-side (functions/src/index.ts → settleTrip / settleTip).
+      _trips.doc(tripId).update({'rating': stars, 'tip': tip, 'status': TripStatus.completed.name});
 
   @override
   Stream<List<Trip>> myTrips() => _trips
@@ -242,7 +228,7 @@ class FirebaseBackend implements WasilhaBackend {
     }
   }
 
-  /// Push the driver's position to the active trip (call from a location stream).
+  @override
   Future<void> updateDriverLocation(String tripId, double lat, double lng) =>
       _trips.doc(tripId).update({'driverLat': lat, 'driverLng': lng});
 
@@ -253,6 +239,28 @@ class FirebaseBackend implements WasilhaBackend {
       .limit(100)
       .snapshots()
       .map((q) => q.docs.map((d) => Trip.fromMap(d.id, d.data())).toList());
+
+  // ── Chat ──────────────────────────────────────────────────
+  @override
+  Stream<List<ChatMessage>> chat(String tripId) => _trips
+      .doc(tripId)
+      .collection('messages')
+      .orderBy('createdAt')
+      .limitToLast(200)
+      .snapshots()
+      .map((q) => q.docs.map((d) => ChatMessage.fromMap(d.id, d.data())).toList());
+
+  @override
+  Future<void> sendMessage(String tripId, String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    await _trips.doc(tripId).collection('messages').add(ChatMessage(id: '', senderId: uid!, text: t).toMap());
+  }
+
+  // ── Push ──────────────────────────────────────────────────
+  @override
+  Future<void> registerPushToken(String token) =>
+      _me().set({'fcmTokens': FieldValue.arrayUnion([token])}, SetOptions(merge: true));
 
   // ── Wallet ────────────────────────────────────────────────
   @override
@@ -266,15 +274,21 @@ class FirebaseBackend implements WasilhaBackend {
   @override
   Future<void> topUp(int amount, String method) async {
     if (amount <= 0) throw BackendException('Enter an amount');
-    // NOTE: in production this must be done server-side (Cloud Function)
-    // after the payment provider confirms the charge.
-    final batch = _db.batch();
-    batch.update(_me(), {'balance': FieldValue.increment(amount)});
-    batch.set(_me().collection('transactions').doc(),
-        WalletTxn(id: '', title: 'Top-up · $method', amount: amount, kind: 'topup').toMap());
-    batch.set(_me().collection('notifications').doc(),
-        AppNotification(id: '', title: 'Wallet topped up', body: '$amount SDG added via $method.', kind: 'wallet').toMap());
-    await batch.commit();
+    final ref = await _db.collection('topups').add({
+      'uid': uid,
+      'amount': amount,
+      'method': method,
+      'status': 'pending',
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    // Wait briefly for the server to confirm (instant with ALLOW_FAKE_TOPUPS;
+    // with a real provider the doc gets a checkoutUrl / is paid via webhook).
+    try {
+      final done = await ref.snapshots().firstWhere((d) => d.data()?['status'] != 'pending').timeout(const Duration(seconds: 20));
+      if (done.data()?['status'] == 'rejected') throw BackendException('Top-up was rejected');
+    } on TimeoutException {
+      throw BackendException('Top-up is pending payment confirmation');
+    }
   }
 
   // ── Account ───────────────────────────────────────────────
@@ -311,24 +325,18 @@ class FirebaseBackend implements WasilhaBackend {
   // ── Food & store ──────────────────────────────────────────
   @override
   Future<String> placeFoodOrder({required Restaurant restaurant, required List<OrderLine> lines, required int total}) async {
-    final orderRef = _orders.doc();
-    await _db.runTransaction((tx) async {
-      final meSnap = await tx.get(_me());
-      final me = UserProfile.fromMap(uid!, meSnap.data() ?? {});
-      if (me.balance < total) throw BackendException('Insufficient wallet balance — top up first');
-      tx.set(orderRef, StoreOrder(
-        id: '',
-        storeId: restaurant.id,
-        customerId: me.uid,
-        customerName: me.name,
-        lines: lines,
-        total: total,
-      ).toMap());
-      tx.update(_me(), {'balance': FieldValue.increment(-total)});
-      tx.set(_me().collection('transactions').doc(),
-          WalletTxn(id: '', title: '${restaurant.name} · order', amount: -total, kind: 'food').toMap());
-    });
-    return orderRef.id;
+    final me = UserProfile.fromMap(uid!, (await _me().get()).data() ?? {});
+    if (me.balance < total) throw BackendException('Insufficient wallet balance — top up first');
+    // The wallet is charged by the onOrderCreated Cloud Function.
+    final ref = await _orders.add(StoreOrder(
+      id: '',
+      storeId: restaurant.id,
+      customerId: me.uid,
+      customerName: me.name,
+      lines: lines,
+      total: total,
+    ).toMap());
+    return ref.id;
   }
 
   @override

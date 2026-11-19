@@ -52,6 +52,17 @@ abstract class WasilhaBackend {
   Future<void> setTripStatus(String tripId, TripStatus status);
   Stream<List<Trip>> driverTrips();
 
+  /// Live driver position for the rider's map (driver app streams GPS here).
+  Future<void> updateDriverLocation(String tripId, double lat, double lng);
+
+  // ── Trip chat ─────────────────────────────────────────────
+  Stream<List<ChatMessage>> chat(String tripId);
+  Future<void> sendMessage(String tripId, String text);
+
+  // ── Push notifications ────────────────────────────────────
+  /// Stores this device's FCM token on the user so Cloud Functions can notify it.
+  Future<void> registerPushToken(String token);
+
   // ── Wallet ────────────────────────────────────────────────
   Stream<List<WalletTxn>> transactions();
 

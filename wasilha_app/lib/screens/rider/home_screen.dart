@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_state.dart';
+import '../../core/location.dart';
 import '../../core/nav.dart';
 import '../../data/backend.dart';
 import '../../data/catalog.dart';
@@ -32,6 +33,20 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _tripId;
   Stream<Trip?>? _trip;
   final _extent = ValueNotifier<double>(_initial);
+
+  @override
+  void initState() {
+    super.initState();
+    _locate();
+  }
+
+  /// Use the device GPS as pickup the first time Home opens (falls back silently).
+  Future<void> _locate() async {
+    final s = context.read<AppState>();
+    if (s.pickup.id == 'gps') return;
+    final here = await LocationService.currentPlace();
+    if (here != null && mounted) s.setPickup(here);
+  }
 
   Stream<Trip?>? _tripStream(String? id) {
     if (id != _tripId) {

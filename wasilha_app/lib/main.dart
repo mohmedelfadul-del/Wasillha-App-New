@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'core/app_state.dart';
+import 'core/push.dart';
 import 'data/backend.dart';
 import 'data/demo_backend.dart';
 import 'data/firebase_backend.dart';
@@ -20,6 +21,9 @@ Future<void> main() async {
 
   final backend = await _initBackend();
   final prefs = await SharedPreferences.getInstance();
+
+  // Register for push once signed in (no-op in demo mode).
+  backend.profile().listen((p) => p == null ? PushService.stop() : PushService.start(backend));
 
   runApp(
     MultiProvider(

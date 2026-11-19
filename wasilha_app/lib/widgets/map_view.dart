@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../core/app_state.dart';
+import '../data/geo_api.dart';
 import '../data/models.dart';
 import '../theme/tokens.dart';
 
@@ -283,12 +284,35 @@ class _GoogleMapView extends StatefulWidget {
 class _GoogleMapViewState extends State<_GoogleMapView> {
   final _ctrl = Completer<GoogleMapController>();
 
+  /// Road-following path from the Routes API (null → straight line).
+  List<LatLng>? _road;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRoute();
+  }
+
+  Future<void> _loadRoute() async {
+    final d = widget.dropoff;
+    if (d == null) {
+      if (_road != null) setState(() => _road = null);
+      return;
+    }
+    final pts = await GeoApi.route(widget.pickup, d);
+    if (!mounted || widget.dropoff?.id != d.id) return;
+    setState(() => _road = pts?.map((p) => LatLng(p.$1, p.$2)).toList());
+  }
+
   LatLng get _p => LatLng(widget.pickup.lat, widget.pickup.lng);
 
   @override
   void didUpdateWidget(covariant _GoogleMapView old) {
     super.didUpdateWidget(old);
-    if (old.dropoff?.id != widget.dropoff?.id || old.pickup.id != widget.pickup.id) _frame();
+    if (old.dropoff?.id != widget.dropoff?.id || old.pickup.id != widget.pickup.id) {
+      _frame();
+      _loadRoute();
+    }
   }
 
   Future<void> _frame() async {
@@ -327,10 +351,15 @@ class _GoogleMapViewState extends State<_GoogleMapView> {
           alpha: 0.8,
         ),
     };
-    // Straight-line route; swap in the Directions API for road-snapped paths.
+    // Road path from the Routes API when GOOGLE_API_KEY is set, otherwise a straight line.
     final polylines = <Polyline>{
       if (d != null)
-        Polyline(polylineId: const PolylineId('route'), points: [_p, LatLng(d.lat, d.lng)], color: widget.accent, width: 5),
+        Polyline(
+          polylineId: const PolylineId('route'),
+          points: _road ?? [_p, LatLng(d.lat, d.lng)],
+          color: widget.accent,
+          width: 5,
+        ),
     };
     return GoogleMap(
       initialCameraPosition: CameraPosition(target: _p, zoom: 14.5),

@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wasilha/data/catalog.dart';
 import 'package:wasilha/data/demo_backend.dart';
+import 'package:wasilha/data/geo_api.dart';
 import 'package:wasilha/data/models.dart';
 
 /// Exercises the rider ↔ driver loop against the in-memory backend
@@ -50,5 +51,33 @@ void main() {
       () => b.placeFoodOrder(restaurant: r, lines: const [], total: 10000000),
       throwsA(anything),
     );
+  });
+
+  test('decodes Google encoded polylines', () {
+    // Example from Google's polyline docs.
+    final pts = GeoApi.decodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@');
+    expect(pts.length, 3);
+    expect(pts[0].$1, closeTo(38.5, 1e-5));
+    expect(pts[0].$2, closeTo(-120.2, 1e-5));
+    expect(pts[2].$1, closeTo(43.252, 1e-5));
+  });
+
+  test('chat: demo driver replies to the rider', () async {
+    final b = DemoBackend();
+    await b.sendCode('+249912345678');
+    await b.verifyCode('123456');
+    final id = await b.requestTrip(
+      service: ServiceType.car,
+      pickup: Catalog.defaultPickup,
+      dropoff: Catalog.places[1],
+      offeredFare: 2000,
+    );
+    final bids = await b.watchBids(id).firstWhere((l) => l.isNotEmpty).timeout(const Duration(seconds: 10));
+    await b.acceptBid(id, bids.first);
+    await b.sendMessage(id, 'Where are you?');
+    final msgs = await b.chat(id).firstWhere((m) => m.length >= 2).timeout(const Duration(seconds: 6));
+    expect(msgs.first.senderId, 'demo-user');
+    expect(msgs[1].senderId, bids.first.driverId);
+    await b.cancelTrip(id);
   });
 }

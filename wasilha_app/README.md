@@ -26,12 +26,21 @@ flutter run                       # demo mode, illustrated map
    - iOS, bundle id `sd.wasilha.app` → download `GoogleService-Info.plist` → drag it into `ios/Runner` in Xcode
      (tick “Copy items” and the Runner target). For Phone Auth on iOS also upload an APNs key in the Firebase
      console, then add the `REVERSED_CLIENT_ID` URL scheme to Info.plist.
-5. Deploy the rules and indexes:
+5. Deploy the rules, indexes and Cloud Functions (the functions need the Blaze plan):
    ```bash
    npm i -g firebase-tools && firebase login
    firebase use --add            # pick your project
-   firebase deploy --only firestore
+   cp functions/.env.example functions/.env   # set ALLOW_FAKE_TOPUPS=false for production
+   (cd functions && npm install)
+   firebase deploy --only firestore,functions
    ```
+   The Cloud Functions do everything that moves money or reaches other users:
+   - push notifications
+   - charging the rider and paying the driver (minus `COMMISSION_RATE`)
+   - charging and refunding food orders
+   - crediting top-ups
+
+   In Firebase mode the app only records the intent, and the security rules stop it changing balances itself.
 6. `flutter run`. The app finds the config files and uses Firebase. To force demo mode anyway, run
    `flutter run --dart-define=WASILHA_DEMO=true`.
 
@@ -46,19 +55,53 @@ By default the app draws the illustrated map from the design. To use real Google
 3. iOS: create `ios/Flutter/Secrets.xcconfig` containing `MAPS_API_KEY=your_key`.
 4. Run with `flutter run --dart-define=USE_GOOGLE_MAPS=true`.
 
-Routes are drawn as straight lines between pickup and drop-off. For road-following routes, add the Directions API.
-Destination search uses a built-in list of Khartoum places (`lib/data/catalog.dart`). For full address search,
-replace it with the Places API.
+### Address search and road routes
+
+Enable **Places API (New)** and **Routes API** on the same Google Cloud project, then run with
+`--dart-define=GOOGLE_API_KEY=your_key`:
+
+- **Destination search** adds Google results, biased to Khartoum, to the built-in places list.
+- **The route** on the Google map follows the roads.
+
+Without the key, search uses `lib/data/catalog.dart` and the route is a straight line.
+Restrict the key to these two APIs and to your app's package name and bundle id.
+
+## Push notifications
+
+Push works automatically in Firebase mode: the app saves the device's FCM token and the Cloud Functions send the messages.
+
+- **Android:** no extra setup.
+- **iOS:**
+  1. Upload an APNs key in the Firebase console → Project settings → Cloud Messaging.
+  2. In Xcode, add the **Push Notifications** capability to the Runner target.
+  3. Add the **Background Modes → Remote notifications** capability too. Info.plist already includes it.
+
+## Test the backend locally (Firebase emulator)
+
+```bash
+(cd functions && npm install && npm run build)
+firebase emulators:start --only auth,firestore,functions --project demo-wasilha
+```
 
 ## Build for release
 
+Android signing: create an upload key, then add `android/key.properties` (not committed):
+
+```
+storeFile=/absolute/path/upload-keystore.jks
+storePassword=...
+keyAlias=upload
+keyPassword=...
+```
+
 ```bash
+keytool -genkey -v -keystore ~/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
 flutter build appbundle           # Android → build/app/outputs/bundle/release/
 flutter build ipa                 # iOS (on a Mac with Xcode)
 ```
 
-Before you publish, set up a release signing key for Android (`android/app/build.gradle.kts` currently signs
-release builds with the debug key) and a team and provisioning profile in Xcode.
+Without `key.properties`, release builds are signed with the debug key, which is fine for testing only.
+For iOS, choose your team and provisioning profile in Xcode.
 
 ## Project layout
 
@@ -73,6 +116,10 @@ lib/
   data/firebase_backend.dart  Firebase Auth (phone OTP) + Firestore
   data/demo_backend.dart    in-memory simulation
   data/catalog.dart         Khartoum places + restaurants
+  data/geo_api.dart         Google Places search + Routes API (optional key)
+  core/location.dart        GPS pickup + driver position streaming
+  core/push.dart            FCM registration, in-app banners, tap → screen
+functions/src/index.ts      Cloud Functions: notifications, settlement, orders, top-ups
   theme/tokens.dart         colors, type (Geist, Instrument Serif, IBM Plex Sans Arabic, Amiri)
   widgets/                  icons, glass, buttons, map, service cards
   screens/                  onboarding · rider · account · driver · store
@@ -89,22 +136,21 @@ firestore.rules, firestore.indexes.json, firebase.json
 | `users/{uid}/places` | saved places |
 | `trips/{id}` | rider, service, pickup/dropoff, offeredFare/finalFare, status, driver details and live position |
 | `trips/{id}/bids/{driverId}` | driver counter-offers |
+| `trips/{id}/messages` | rider ↔ driver chat |
+| `topups/{id}` | top-up intents (`pending` → `paid` by the server) |
 | `orders/{id}` | food and store orders |
 
 Trip flow: the rider creates a trip (`requested`) → drivers bid → the rider accepts one (`accepted`) → the driver
 moves it to `arriving`, then `inProgress`, then `completed` → the rider rates it and the wallet is charged.
 
-## Production checklist (not done yet)
+## What's left before launch
 
-- **Payments**: top-ups are recorded, but no money moves. Integrate a provider (Bankak / mBOK / card acquirer) and
-  credit the wallet from a **Cloud Function** after the provider confirms. Then make `balance` read-only for clients
-  in `firestore.rules`.
-- **Trip charging and driver payouts** should also move to Cloud Functions.
-- **Push notifications** (FCM) for new requests, accepted bids and arrivals. Today notifications only show while the app is open.
-- **Driver location**: `FirebaseBackend.updateDriverLocation` exists. Feed it from a `geolocator` position stream
-  while a trip is active, and request location permission at runtime.
-- In-app chat with the driver. The chat button currently shows "coming soon".
-- App icons and splash for the stores (e.g. `flutter_launcher_icons`).
+- **Real payment provider.** `functions/src/index.ts` has the full flow ready:
+  - `onTopupCreated` is where you create the payment session with your provider (Bankak / mBOK / card acquirer).
+  - `paymentWebhook` is the HMAC-verified callback that credits the wallet. Set `PAYMENT_WEBHOOK_SECRET` in Secret Manager.
+  - Until then, `ALLOW_FAKE_TOPUPS=true` credits top-ups instantly, so keep it for testing only.
+- iOS push capability in Xcode and the APNs key (see above).
+- Store listing assets and the privacy policy. The app requests location permission and stores phone numbers.
 
 ---
 
@@ -120,5 +166,15 @@ moves it to `arriving`, then `inProgress`, then `completed` → the rider rates 
 **خرائط Google:** ضع المفتاح `MAPS_API_KEY` في `android/local.properties` وفي `ios/Flutter/Secrets.xcconfig`،
 ثم شغّل `flutter run --dart-define=USE_GOOGLE_MAPS=true`.
 
-**قبل الإطلاق:** يجب ربط بوابة دفع حقيقية ونقل عمليات المحفظة إلى Cloud Functions، وإضافة الإشعارات (FCM)
-وتتبع موقع السائق الحي.
+**ما أُنجز:**
+- المحادثة بين الراكب والسائق.
+- موقع السائق الحي من GPS، وتحديد موقعك تلقائياً كنقطة انطلاق.
+- الإشعارات (FCM).
+- عمليات المحفظة على الخادم (Cloud Functions) مع قواعد حماية تمنع التلاعب بالرصيد.
+- البحث عن العناوين ومسار الرحلة على الشوارع (بمفتاح Google).
+- توقيع نسخة الإصدار.
+
+**المتبقي قبل الإطلاق:**
+- ربط مزوّد دفع حقيقي في `functions/src/index.ts`.
+- تفعيل الإشعارات في Xcode لنسخة iOS.
+- سياسة الخصوصية وصور المتجر.

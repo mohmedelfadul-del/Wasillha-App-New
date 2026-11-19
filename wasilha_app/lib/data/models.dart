@@ -534,3 +534,26 @@ class StoreOrder {
         createdAt: DateTime.fromMillisecondsSinceEpoch((m['createdAt'] as num?)?.toInt() ?? 0),
       );
 }
+
+/// One message in a trip's rider ↔ driver chat.
+class ChatMessage {
+  ChatMessage({required this.id, required this.senderId, required this.text, DateTime? createdAt})
+      : createdAt = createdAt ?? DateTime.now();
+  final String id;
+  final String senderId;
+  final String text;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toMap() => {
+        'senderId': senderId,
+        'text': text,
+        'createdAt': createdAt.millisecondsSinceEpoch,
+      };
+
+  factory ChatMessage.fromMap(String id, Map<String, dynamic> m) => ChatMessage(
+        id: id,
+        senderId: (m['senderId'] ?? '') as String,
+        text: (m['text'] ?? '') as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch((m['createdAt'] as num?)?.toInt() ?? 0),
+      );
+}
