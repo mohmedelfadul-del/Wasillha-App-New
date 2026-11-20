@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, collectionGroup, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { geohashForLocation } from "geofire-common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { admin, client, closeAll, type Client } from "./helpers";
@@ -58,6 +58,18 @@ describe("driver location", () => {
     expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-a"), { ...p, updatedAt: serverTimestamp() }))).toBe(false);
     expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: Date.now() }))).toBe(false);
     expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: serverTimestamp(), online: true }))).toBe(false);
+  });
+});
+
+describe("KYC queue", () => {
+  it("staff can list pending documents across drivers; drivers cannot", async () => {
+    await admin.doc("drivers/rules-driver-a/documents/national_id").set({ status: "pending", driverId: "rules-driver-a", submittedAt: 1 });
+    const staff = await client("rules-staff-kyc", { claims: { staff: true, role: "kyc" } });
+    const q = (c: Client) => getDocs(query(collectionGroup(c.db, "documents"), where("status", "==", "pending")));
+    expect(await ok(q(staff))).toBe(true);
+    expect(await ok(q(driverA))).toBe(false);
+    expect(await ok(getDoc(doc(driverA.db, "drivers/rules-driver-a/documents/national_id")))).toBe(true);
+    expect(await ok(getDoc(doc(driverB.db, "drivers/rules-driver-a/documents/national_id")))).toBe(false);
   });
 });
 

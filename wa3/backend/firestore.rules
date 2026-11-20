@@ -94,6 +94,12 @@ service cloud.firestore {
       allow read: if signedIn() && (me() == uid || hasRole('admin'));
       allow write: if false;
     }
+    // KYC queue: staff list pending documents across drivers and vehicles
+    // (collection-group query). Owners keep reading their own via the rules above.
+    match /{path=**}/documents/{type} {
+      allow read: if isStaff();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

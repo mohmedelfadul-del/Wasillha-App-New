@@ -1,0 +1,86 @@
+name: WA3 (rider · driver · ops · backend)
+
+on:
+  push:
+    branches: [main]
+    paths: ['wa3/**', '.github/workflows/wa3.yml']
+  pull_request:
+    paths: ['wa3/**', '.github/workflows/wa3.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: wa3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — unit, rules & end-to-end (emulator)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wa3/backend/functions
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: wa3/backend/functions/package-lock.json
+      - uses: actions/setup-java@v5   # Firestore emulator
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm run build
+      - name: Unit tests (state machine, pricing, ledger, idempotency)
+        run: npm test
+      - name: Rules + full-trip E2E on the emulator
+        run: npx --yes firebase-tools@14 emulators:exec --only auth,firestore,functions --project demo-wa3 "cd functions && npx vitest run test/emulator --no-file-parallelism"
+        working-directory: wa3/backend
+
+  core:
+    name: wa3_core — contract & widget tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wa3/packages/wa3_core
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  apps:
+    name: ${{ matrix.app }} — analyze, test, build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [rider, driver, ops]
+    defaults:
+      run:
+        working-directory: wa3/apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        if: matrix.app != 'ops'
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build web (ops)
+        if: matrix.app == 'ops'
+        run: flutter build web --release
+      - name: Build APK (rider/driver, emulator-flavoured for testing)
+        if: matrix.app != 'ops'
+        run: flutter build apk --release --dart-define=USE_EMULATOR=false
+      - uses: actions/upload-artifact@v5
+        if: matrix.app != 'ops'
+        with:
+          name: wasilha-${{ matrix.app }}-apk
+          path: wa3/apps/${{ matrix.app }}/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
