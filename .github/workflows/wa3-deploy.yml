@@ -1,0 +1,178 @@
+name: WA3 deploy (provision Firebase, deploy, build connected apps)
+
+# Run manually: GitHub → Actions → "WA3 deploy" → Run workflow.
+# One-time setup (see wa3/docs/deploy.md):
+#   secret  FIREBASE_SERVICE_ACCOUNT  — JSON key of a service account with Owner on the project
+#   variable WA3_PROJECT_ID           — the Firebase project id (or type it in the form)
+# Optional secrets for a stable Android signing key:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: Firebase project id (leave empty to use the WA3_PROJECT_ID variable)
+        required: false
+      staff_email:
+        description: Email of the first staff member (gets a password-setup email)
+        required: false
+      staff_role:
+        description: Role for that staff member
+        type: choice
+        options: [admin, operations, kyc, support, finance]
+        default: admin
+      alert_email:
+        description: Email that receives monitoring alerts
+        required: false
+      test_phones:
+        description: 'Optional fictional test numbers as JSON, e.g. {"+249900000001":"123456"}'
+        required: false
+      app_check_enforce:
+        description: Enforce App Check (only once apps ship via Play / TestFlight)
+        type: boolean
+        default: false
+
+concurrency:
+  group: wa3-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PROJECT_ID: ${{ inputs.project_id || vars.WA3_PROJECT_ID }}
+      REGION: europe-west1
+      OUT: ${{ github.workspace }}/wa3/backend/out
+    defaults:
+      run:
+        working-directory: wa3/backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check inputs
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$PROJECT_ID" ]; then echo "::error::Set the project id (form field or the WA3_PROJECT_ID repository variable)."; exit 1; fi
+          if [ -z "$SA" ]; then echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret (see wa3/docs/deploy.md)."; exit 1; fi
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: alpha,beta
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Install Firebase CLI
+        run: npm i -g firebase-tools@14
+
+      - name: Android signing key
+        id: signing
+        working-directory: ${{ github.workspace }}
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          KS="$RUNNER_TEMP/upload.jks"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$KS"
+            STOREPASS="$KS_PASS"; ALIAS="$KS_ALIAS"; KEYPASS="$KS_KEYPASS"
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          else
+            STOREPASS=$(openssl rand -hex 16); ALIAS=wasilha; KEYPASS="$STOREPASS"
+            keytool -genkeypair -noprompt -keystore "$KS" -storepass "$STOREPASS" -keypass "$KEYPASS" -alias "$ALIAS" \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Wasilha Beta, O=Wasilha, C=SD"
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          fi
+          for app in rider driver; do
+            printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KS" "$STOREPASS" "$ALIAS" "$KEYPASS" > "wa3/apps/$app/android/key.properties"
+          done
+          FP=$(keytool -list -v -keystore "$KS" -storepass "$STOREPASS" -alias "$ALIAS")
+          echo "SIGNING_SHA1=$(echo "$FP" | awk '/SHA1:/{print $2}')" >> "$GITHUB_ENV"
+          echo "SIGNING_SHA256=$(echo "$FP" | awk '/SHA256:/{print $2}')" >> "$GITHUB_ENV"
+
+      - name: Provision project (APIs, Auth, Firestore, Storage, Maps keys, apps, App Check)
+        env:
+          APP_CHECK_ENFORCE: ${{ inputs.app_check_enforce }}
+          TEST_PHONES: ${{ inputs.test_phones }}
+        run: ./scripts/provision.sh
+
+      - name: Backend build + unit tests
+        working-directory: wa3/backend/functions
+        run: npm ci && npm run build && npm test
+
+      - name: Deploy Firestore rules/indexes, Storage rules, Functions
+        run: |
+          TARGETS="firestore,functions"
+          if gcloud storage buckets describe "gs://$PROJECT_ID.firebasestorage.app" >/dev/null 2>&1; then TARGETS="$TARGETS,storage"; fi
+          # First deploys can hit IAM propagation delays for Eventarc/Cloud Build — retry.
+          for i in 1 2 3; do
+            firebase deploy --only "$TARGETS" --project "$PROJECT_ID" --force --non-interactive && break
+            [ "$i" = 3 ] && exit 1; echo "Retrying in 90 s…"; sleep 90
+          done
+
+      - name: Seed zone + pricing (existing values are kept) and staff
+        env:
+          GCLOUD_PROJECT: ${{ env.PROJECT_ID }}
+          STAFF_EMAIL: ${{ inputs.staff_email }}
+          STAFF_ROLE: ${{ inputs.staff_role }}
+        run: |
+          export FIREBASE_WEB_API_KEY=$(jq -r '.apiKey' "$OUT/ops-web-config.json")
+          node functions/scripts/seed.js
+          if [ -n "$STAFF_EMAIL" ]; then node functions/scripts/seed.js --staff "$STAFF_EMAIL" "$STAFF_ROLE" --create; fi
+
+      - name: Monitoring metrics + alerts
+        env:
+          ALERT_EMAIL: ${{ inputs.alert_email }}
+        run: ./scripts/monitoring.sh
+
+      - name: Build + deploy the operations console (Firebase Hosting)
+        run: |
+          C="$OUT/ops-web-config.json"
+          (cd ../apps/ops && flutter pub get && flutter build web --release \
+            --dart-define=FIREBASE_API_KEY=$(jq -r .apiKey "$C") \
+            --dart-define=FIREBASE_APP_ID=$(jq -r .appId "$C") \
+            --dart-define=FIREBASE_PROJECT_ID=$(jq -r .projectId "$C") \
+            --dart-define=FIREBASE_AUTH_DOMAIN=$(jq -r .authDomain "$C") \
+            --dart-define=FIREBASE_STORAGE_BUCKET=$(jq -r .storageBucket "$C") \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID=$(jq -r .messagingSenderId "$C") \
+            --dart-define=APP_CHECK_SITE_KEY=$(jq -r .appCheckSiteKey "$C"))
+          firebase deploy --only hosting --project "$PROJECT_ID" --non-interactive
+
+      - name: Build rider + driver APKs connected to the project
+        run: |
+          for app in rider driver; do
+            cp "$OUT/$app-google-services.json" "../apps/$app/android/app/google-services.json"
+            echo "MAPS_API_KEY=$(cat "$OUT/maps-android-key.txt")" >> "../apps/$app/android/local.properties"
+            (cd "../apps/$app" && flutter pub get && flutter build apk --release)
+            cp "../apps/$app/build/app/outputs/flutter-apk/app-release.apk" "$OUT/wasilha-$app.apk"
+          done
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wasilha-apps-${{ env.PROJECT_ID }}
+          path: |
+            wa3/backend/out/wasilha-rider.apk
+            wa3/backend/out/wasilha-driver.apk
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Wasilha deployed to \`$PROJECT_ID\`"
+            echo "- Operations console: https://$PROJECT_ID.web.app"
+            echo "- Rider and driver APKs: the **wasilha-apps-$PROJECT_ID** artifact below"
+            if [ "${{ steps.signing.outputs.stable }}" != "true" ]; then
+              echo "- ⚠ APKs were signed with a one-off key. Uninstall the previous build before installing a new one, or add the ANDROID_KEYSTORE_* secrets (wa3/docs/deploy.md)."
+            fi
+            if [ -s "$OUT/WARNINGS.md" ]; then echo "### Needs attention"; cat "$OUT/WARNINGS.md"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

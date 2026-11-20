@@ -95,4 +95,6 @@ CI: `.github/workflows/wa3.yml` runs all of these and builds the APKs and the co
    - A Maps SDK key restricted to the apps, for map tiles only.
    - The ops console gets its web config through `--dart-define`.
 
+**Automated:** see [`docs/deploy.md`](docs/deploy.md) — the **WA3 deploy** workflow does all of the above.
+
 See [`docs/operations.md`](docs/operations.md) for monitoring, alerts and the backup drill.
