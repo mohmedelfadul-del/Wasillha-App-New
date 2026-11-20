@@ -1,0 +1,14 @@
+include: package:flutter_lints/flutter.yaml
+analyzer:
+  errors:
+    deprecated_member_use: ignore
+    # Enum names mirror the wire contract (snake_case document types / ledger kinds).
+    constant_identifier_names: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+linter:
+  rules:
+    prefer_const_constructors: true
+    always_declare_return_types: true
