@@ -1,0 +1,27 @@
+{
+  "indexes": [
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "riderId", "order": "ASCENDING" }, { "fieldPath": "state", "order": "ASCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "riderId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "driverId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "state", "order": "ASCENDING" }, { "fieldPath": "expiresAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "zoneId", "order": "ASCENDING" }, { "fieldPath": "state", "order": "ASCENDING" }, { "fieldPath": "category", "order": "ASCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "state", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "offers", "queryScope": "COLLECTION_GROUP", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "expiresAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "documents", "queryScope": "COLLECTION_GROUP", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "submittedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "ledger", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "driverId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "cases", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "requests", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "expiresAt", "order": "ASCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,101 @@
+rules_version = '2';
+
+// Wasilha v1 — least privilege.
+// Every mutation goes through Cloud Functions (commands). Clients only read,
+// except the driver's own GPS presence document.
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function isStaff() { return signedIn() && request.auth.token.staff == true; }
+    function hasRole(r) { return isStaff() && (request.auth.token.role == r || request.auth.token.role == 'admin'); }
+
+    match /riders/{uid} {
+      allow read: if signedIn() && (me() == uid || isStaff());
+      allow write: if false;
+    }
+
+    match /drivers/{uid} {
+      allow read: if signedIn() && (me() == uid || isStaff());
+      allow write: if false;
+      match /documents/{type} {
+        allow read: if signedIn() && (me() == uid || isStaff());
+        allow write: if false;
+      }
+    }
+
+    match /vehicles/{id} {
+      allow read: if signedIn() && (resource.data.driverId == me() || isStaff());
+      allow write: if false;
+      match /documents/{type} {
+        allow read: if signedIn() && (get(/databases/$(db)/documents/vehicles/$(id)).data.driverId == me() || isStaff());
+        allow write: if false;
+      }
+    }
+
+    // Driver GPS. The driver writes only their own position, stamped with the server time.
+    match /presence/{uid} {
+      allow read: if signedIn() && (
+        me() == uid || isStaff() ||
+        get(/databases/$(db)/documents/drivers/$(uid)).data.activeRiderId == me());
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['lat', 'lng', 'geohash', 'heading', 'speed', 'accuracy', 'updatedAt'])
+        && request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+        && request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
+        && request.resource.data.geohash is string && request.resource.data.geohash.size() <= 12
+        && request.resource.data.updatedAt == request.time.toMillis();
+      allow delete: if false;
+    }
+
+    match /trips/{tripId} {
+      allow read: if signedIn() && (resource.data.riderId == me() || resource.data.driverId == me() || isStaff());
+      allow write: if false;
+
+      match /offers/{driverId} {
+        allow read: if signedIn() && (
+          driverId == me() || isStaff() ||
+          get(/databases/$(db)/documents/trips/$(tripId)).data.riderId == me());
+        allow write: if false;
+      }
+      match /private/{doc} {
+        allow read: if isStaff();
+        allow write: if false;
+      }
+    }
+
+    // Sanitized request cards fanned out by the server.
+    match /inbox/{uid}/requests/{tripId} {
+      allow read: if signedIn() && me() == uid;
+      allow write: if false;
+    }
+
+    match /ledger/{id} {
+      allow read: if signedIn() && (resource.data.driverId == me() || hasRole('finance') || hasRole('operations'));
+      allow write: if false;
+    }
+
+    match /zones/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /pricing/{id} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+    match /cases/{id} {
+      allow read: if signedIn() && (resource.data.reporterId == me() || isStaff());
+      allow write: if false;
+    }
+    match /audit/{id} {
+      allow read: if hasRole('admin');
+      allow write: if false;
+    }
+    match /staff/{uid} {
+      allow read: if signedIn() && (me() == uid || hasRole('admin'));
+      allow write: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
