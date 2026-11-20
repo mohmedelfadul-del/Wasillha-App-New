@@ -22,3 +22,10 @@ subprojects {
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
+
+// Android lint's release "vital" analysis crashes inside some Flutter plugins
+// (e.g. firebase_core: "Unexpected failure during lint analysis"). It's an
+// upstream lint bug, so skip that task for release builds.
+subprojects {
+    tasks.matching { it.name.startsWith("lintVital") }.configureEach { enabled = false }
+}
