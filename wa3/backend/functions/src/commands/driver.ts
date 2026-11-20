@@ -7,7 +7,7 @@ import { entry } from "../domain/ledger";
 import { command, int, str } from "../lib/command";
 import { backfillForDriver, clearInbox } from "../lib/dispatch";
 import { C, db } from "../lib/firestore";
-import { insidePolygon, km, type LatLng } from "../lib/geo";
+import { insidePolygon, km, millis, type LatLng } from "../lib/geo";
 import { loadTrip, transition, type TripDoc } from "../lib/trips";
 
 export const DRIVER_DOCS: readonly DocumentType[] = ["national_id", "driving_license", "driver_photo"];
@@ -104,7 +104,7 @@ export const goOnline = command("goOnline", { audience: "driver", mutating: fals
   if (d.get("status") !== "approved") fail("not_verified", "Your account is not approved yet");
   if (!d.get("activeVehicleId")) fail("validation_failed", "Choose an approved vehicle first");
   const pos = { lat: p.get("lat") as number, lng: p.get("lng") as number };
-  if (!p.exists || ctx.now - (p.get("updatedAt") as number) > TUNABLES.locationStaleSeconds * 1000) {
+  if (!p.exists || ctx.now - millis(p.get("updatedAt")) > TUNABLES.locationStaleSeconds * 1000) {
     fail("validation_failed", "We can't see your location. Turn on location and try again.");
   }
   const zone = zones.docs.find((z) => insidePolygon(pos, (z.get("polygon") ?? []) as LatLng[]));

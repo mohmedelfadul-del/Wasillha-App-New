@@ -33,7 +33,7 @@ service cloud.firestore {
       }
     }
 
-    // Driver GPS. The driver writes only their own position, stamped with the server time.
+    // Driver GPS. The driver writes only their own position; updatedAt must be the server time.
     match /presence/{uid} {
       allow read: if signedIn() && (
         me() == uid || isStaff() ||
@@ -43,7 +43,7 @@ service cloud.firestore {
         && request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
         && request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
         && request.resource.data.geohash is string && request.resource.data.geohash.size() <= 12
-        && request.resource.data.updatedAt == request.time.toMillis();
+        && request.resource.data.updatedAt == request.time;   // client sends serverTimestamp()
       allow delete: if false;
     }
 

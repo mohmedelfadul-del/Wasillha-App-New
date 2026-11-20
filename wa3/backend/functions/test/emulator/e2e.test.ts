@@ -1,4 +1,4 @@
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { geohashForLocation } from "geofire-common";
 import { admin, client, closeAll, DROPOFF, key, NEAR_PICKUP, PICKUP, seed, waitFor, type Client } from "./helpers";
@@ -55,7 +55,8 @@ describe("full trip: onboarding → request → offer → accept → track → f
     expect(v.docs[0].get("status")).toBe("approved");
     await driver.call("setActiveVehicle", { idempotencyKey: key(), vehicleId: v.docs[0].id });
     expect(await driver.code("goOnline")).toBe("validation_failed"); // no location yet
-    await admin.doc("presence/driver-1").set({ lat: NEAR_PICKUP.lat, lng: NEAR_PICKUP.lng, geohash: geohashForLocation([NEAR_PICKUP.lat, NEAR_PICKUP.lng]), updatedAt: Date.now() });
+    // The driver app writes its own GPS (rules require the server timestamp).
+    await setDoc(doc(driver.db, "presence", "driver-1"), { lat: NEAR_PICKUP.lat, lng: NEAR_PICKUP.lng, geohash: geohashForLocation([NEAR_PICKUP.lat, NEAR_PICKUP.lng]), updatedAt: serverTimestamp() });
     const r = await driver.call("goOnline");
     expect(r.online).toBe(true);
   });

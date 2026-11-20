@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { geohashForLocation } from "geofire-common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { admin, client, closeAll, type Client } from "./helpers";
@@ -52,11 +52,12 @@ describe("driver location", () => {
     expect(await ok(getDoc(doc(riderB.db, "presence/rules-driver-a")))).toBe(false);
     expect(await ok(getDoc(doc(riderA.db, "presence/rules-driver-b")))).toBe(false);
   });
-  it("a driver can't write someone else's location or forge the time", async () => {
+  it("a driver writes their own location with the server time, and nothing else", async () => {
     const p = { lat: 15.6, lng: 32.6, geohash: geohashForLocation([15.6, 32.6]) };
-    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-a"), { ...p, updatedAt: Date.now() }))).toBe(false);
-    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: 1 }))).toBe(false);
-    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: Date.now(), online: true }))).toBe(false);
+    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: serverTimestamp() }))).toBe(true);
+    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-a"), { ...p, updatedAt: serverTimestamp() }))).toBe(false);
+    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: Date.now() }))).toBe(false);
+    expect(await ok(setDoc(doc(driverB.db, "presence/rules-driver-b"), { ...p, updatedAt: serverTimestamp(), online: true }))).toBe(false);
   });
 });
 

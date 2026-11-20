@@ -6,6 +6,7 @@ import { DRIVER_ACTIVE_STATES, OPEN_REQUEST_STATES, TUNABLES, type TripState } f
 import { nextState } from "./domain/tripMachine";
 import { cleanup, clearInbox, fanOut } from "./lib/dispatch";
 import { C, db, now } from "./lib/firestore";
+import { millis } from "./lib/geo";
 import type { TripDoc } from "./lib/trips";
 
 const isOpen = (s?: TripState) => !!s && OPEN_REQUEST_STATES.includes(s);
@@ -62,7 +63,7 @@ export async function sweep() {
     const since = trip.timestamps[trip.state] ?? trip.updatedAt;
     const stuck = t - since > TUNABLES.stuckTripMinutes * 60_000;
     const p = trip.driverId ? await db.collection(C.presence).doc(trip.driverId).get() : null;
-    const stale = !p?.exists || t - (p.get("updatedAt") as number) > TUNABLES.locationStaleSeconds * 1000;
+    const stale = !p?.exists || t - millis(p.get("updatedAt")) > TUNABLES.locationStaleSeconds * 1000;
     if (stuck !== trip.flags.stuck || stale !== trip.flags.locationStale) {
       await d.ref.update({ "flags.stuck": stuck, "flags.locationStale": stale });
     }
@@ -74,7 +75,7 @@ export async function sweep() {
   for (const d of online.docs) {
     if (d.get("activeTripId")) continue;
     const p = await db.collection(C.presence).doc(d.id).get();
-    if (!p.exists || t - (p.get("updatedAt") as number) > 120_000) {
+    if (!p.exists || t - millis(p.get("updatedAt")) > 120_000) {
       await d.ref.update({ online: false, offlineReason: "location_lost", updatedAt: t });
       await clearInbox(d.id);
     }
@@ -92,7 +93,7 @@ export const sharedTrip = onRequest({ region: "europe-west1" }, async (req, res)
   }
   const trip = (await db.collection(C.trips).doc(share.get("tripId")).get()).data() as TripDoc | undefined;
   const p = trip?.driverId ? (await db.collection(C.presence).doc(trip.driverId).get()).data() : undefined;
-  const fresh = p && now() - (p.updatedAt as number) <= TUNABLES.locationStaleSeconds * 1000;
+  const fresh = p && now() - millis(p.updatedAt) <= TUNABLES.locationStaleSeconds * 1000;
   const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
   res.set("Cache-Control", "no-store").send(`<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="15">
