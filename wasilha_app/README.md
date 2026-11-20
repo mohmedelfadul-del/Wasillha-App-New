@@ -3,6 +3,13 @@
 A Flutter port of the Wasilha prototype (`../project/`, `../Wasilha.html`): rides (raksha, motor, car),
 fare bidding, live tracking, delivery, food, wallet, safety, plus driver and store modes. Android and iOS.
 
+## Download the APK (no build needed)
+
+Every push to `main` runs **GitHub Actions** (`.github/workflows/wasilha.yml`), which analyzes, tests and builds an Android APK.
+To download it: open the repository on GitHub → **Actions** → the latest **Wasilha app** run → **Artifacts** → `wasilha-apk`.
+Unzip it, copy `app-release.apk` to your phone and open it. You need to allow "install unknown apps".
+This APK runs in demo mode, because the Firebase config isn't in the repository.
+
 ## Run it now (demo mode)
 
 The app works without any setup. If no Firebase config is found it starts in **demo mode**:
@@ -73,8 +80,8 @@ Push works automatically in Firebase mode: the app saves the device's FCM token 
 - **Android:** no extra setup.
 - **iOS:**
   1. Upload an APNs key in the Firebase console → Project settings → Cloud Messaging.
-  2. In Xcode, add the **Push Notifications** capability to the Runner target.
-  3. Add the **Background Modes → Remote notifications** capability too. Info.plist already includes it.
+  2. The entitlements file (`ios/Runner/Runner.entitlements`) and the background mode are already set up.
+     In Xcode, just pick your team under Signing & Capabilities.
 
 ## Test the backend locally (Firebase emulator)
 
@@ -149,8 +156,10 @@ moves it to `arriving`, then `inProgress`, then `completed` → the rider rates 
   - `onTopupCreated` is where you create the payment session with your provider (Bankak / mBOK / card acquirer).
   - `paymentWebhook` is the HMAC-verified callback that credits the wallet. Set `PAYMENT_WEBHOOK_SECRET` in Secret Manager.
   - Until then, `ALLOW_FAKE_TOPUPS=true` credits top-ups instantly, so keep it for testing only.
-- iOS push capability in Xcode and the APNs key (see above).
-- Store listing assets and the privacy policy. The app requests location permission and stores phone numbers.
+- The APNs key in Firebase, for iOS push (see above).
+- Fill in the `[bracketed]` values in `docs/privacy-policy.md` and `docs/terms-of-use.md`, have a lawyer review them,
+  and host them at a public URL. Both stores ask for that link.
+- Store screenshots. The listing text and data-safety answers are in `docs/store-listing.md`.
 
 ---
 

@@ -1,0 +1,68 @@
+name: Wasilha app
+
+on:
+  push:
+    branches: [main]
+    paths: ['wasilha_app/**', '.github/workflows/wasilha.yml']
+  pull_request:
+    paths: ['wasilha_app/**', '.github/workflows/wasilha.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: wasilha-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter:
+    name: Analyze, test, build APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wasilha_app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      # Demo-mode APK (no Firebase config in the repo). Signed with the debug key,
+      # so it installs on any phone for testing but can't be published as-is.
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasilha-apk
+          path: wasilha_app/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+  functions:
+    name: Cloud Functions type-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wasilha_app/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run build
