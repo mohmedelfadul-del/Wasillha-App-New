@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -11,7 +13,7 @@ if (file("google-services.json").exists()) {
 }
 
 // Google Maps key: add MAPS_API_KEY=... to android/local.properties (never commit it).
-val localProps = java.util.Properties().apply {
+val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
@@ -47,7 +49,7 @@ android {
     //   keyAlias=upload
     //   keyPassword=...
     // Without it, release builds fall back to the debug key (fine for testing only).
-    val keyProps = java.util.Properties().apply {
+    val keyProps = Properties().apply {
         val f = rootProject.file("key.properties")
         if (f.exists()) f.inputStream().use { load(it) }
     }
